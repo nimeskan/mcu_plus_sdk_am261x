@@ -32,10 +32,8 @@
 
 /* Adapted by TI for running on its platform and SDK */
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <ctype.h>
+#include <stdint.h>
+#include <stdbool.h>
 
 #if defined(SOC_AM64X) || defined (SOC_AM243X)
 #include <usb/cdn/include/usb_init.h>
@@ -50,13 +48,34 @@
 #include "ti_drivers_open_close.h"
 #include "ti_board_open_close.h"
 
-static void cdc_task(void);
+/* CDC interface the array is sent out on, and how much of it to send */
+#define CDC_SEND_ITF    (0U)
+#define CDC_SEND_LEN    (6000U)
 
+/* CFG_TUD_CDC_TX_BUFSIZE (tusb_config.h) is left untouched at 512 bytes,
+ * so this array is bigger than one write can accept in a single call --
+ * send_task() below feeds it out over several tud_cdc_n_write() calls as
+ * ring buffer space frees up.
+ */
+static uint8_t  gSendBuf[CDC_SEND_LEN];
+static uint32_t gSendOffset = 0;
+static bool     gSendDone   = false;
+
+static void send_task(void);
 
 int cdc_echo_main(void)
 {
+    uint32_t i;
+
     Drivers_open();
     Board_driversOpen();
+
+    /* fill with a recognizable pattern so the host side can verify the
+     * bytes it receives instead of just counting them */
+    for (i = 0; i < CDC_SEND_LEN; i++)
+    {
+        gSendBuf[i] = (uint8_t) (i & 0xFFU);
+    }
 
     while (1)
     {
@@ -65,55 +84,52 @@ int cdc_echo_main(void)
         #else
         USB_dwcTask(); /* Synopsis DWC task */
         #endif
-        tud_task(); /* tinyusb device task */
-        cdc_task(); /* CDC handler */
+        tud_task();   /* tinyusb device task */
+        send_task();  /* push the array out over CDC */
     }
 }
 
-/* echo to either Serial0 or Serial1
-   with Serial0 as all lower case, Serial1 as all upper case
+/* Send the CDC_SEND_LEN-byte array out over CDC interface CDC_SEND_ITF.
+ *
+ * This is one tud_cdc_n_write() call per pass instead of the byte-at-a-time
+ * tud_cdc_n_write_char() loop the echo example used -- that removes the
+ * per-byte function-call/branch overhead that dominated the echo path.
+ *
+ * The TX ring buffer is only CFG_TUD_CDC_TX_BUFSIZE (512) bytes deep, so a
+ * single call can't accept all 6000 bytes at once. Each pass writes as much
+ * of the remaining array as tud_cdc_n_write_available() reports room for,
+ * and resumes from gSendOffset next pass, until the whole array has been
+ * queued and flushed exactly once.
  */
-static void echo_serial_port(uint8_t itf, uint8_t buf[], uint32_t count)
+static void send_task(void)
 {
-    for(uint32_t i=0; i<count; i++)
+    if (gSendDone)
     {
-        if (itf == 0)
-        {
-            /* echo back 1st port as lower case */
-            if (isupper(buf[i])) buf[i] += 'a' - 'A';
-        }
-        else
-        {
-            /* echo back additional ports as upper case */
-            if (islower(buf[i])) buf[i] -= 'a' - 'A';
-        }
-
-        tud_cdc_n_write_char(itf, buf[i]);
+        return;
     }
-    tud_cdc_n_write_flush(itf);
-}
 
-static void cdc_task(void)
-{
-    uint8_t itf;
-
-    for (itf = 0; itf < CFG_TUD_CDC; itf++)
+    if (!tud_cdc_n_connected(CDC_SEND_ITF))
     {
-        /* connected() check for DTR bit
-           Most but not all terminal client set this when making connection
-         */
-        /* if ( tud_cdc_n_connected(itf) ) */
+        return;
+    }
+
+    if (gSendOffset < CDC_SEND_LEN)
+    {
+        uint32_t remain    = CDC_SEND_LEN - gSendOffset;
+        uint32_t available = tud_cdc_n_write_available(CDC_SEND_ITF);
+        uint32_t chunk     = (available < remain) ? available : remain;
+
+        if (chunk > 0)
         {
-            if ( tud_cdc_n_available(itf) )
-            {
-                uint8_t buf[512];
-
-                uint32_t count = tud_cdc_n_read(itf, buf, sizeof(buf));
-
-                /* echo back to both serial ports */
-                echo_serial_port(0, buf, count);
-                echo_serial_port(1, buf, count);
-            }
+            uint32_t written = tud_cdc_n_write(CDC_SEND_ITF, &gSendBuf[gSendOffset], chunk);
+            gSendOffset += written;
+            tud_cdc_n_write_flush(CDC_SEND_ITF);
         }
+    }
+    else
+    {
+        /* make sure the final partial packet actually goes out on the wire */
+        tud_cdc_n_write_flush(CDC_SEND_ITF);
+        gSendDone = true;
     }
 }
