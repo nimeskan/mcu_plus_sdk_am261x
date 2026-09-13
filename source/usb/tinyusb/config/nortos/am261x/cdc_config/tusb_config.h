@@ -193,11 +193,29 @@
 #define CFG_TUD_VENDOR            0
 
 // CDC FIFO size of TX and RX
+//
+// Guarded so an application can raise them from its own build without editing
+// this file - pass e.g. -DCFG_TUD_CDC_TX_BUFSIZE=4096 in DEFINES_common when
+// building the usbd_tusb_cdc_* combo. The buffers live in cdcd_interface_t, a
+// static inside cdc_device.c, so they are fixed when THIS library is compiled;
+// defining the macro in the application has no effect.
+//
+// RX and EP are coupled: _prep_out_transaction() only arms the OUT endpoint
+// while tu_fifo_remaining(rx_ff) >= sizeof(epout_buf), so an EP buffer larger
+// than RX silently stops host-to-device traffic. Raise RX with it (2x) if you
+// ever raise EP. TX has no such coupling and is safe to raise alone.
+//
+#ifndef CFG_TUD_CDC_RX_BUFSIZE
 #define CFG_TUD_CDC_RX_BUFSIZE   (TUD_OPT_HIGH_SPEED ? 512 : 64)
+#endif
+#ifndef CFG_TUD_CDC_TX_BUFSIZE
 #define CFG_TUD_CDC_TX_BUFSIZE   (TUD_OPT_HIGH_SPEED ? 512 : 64)
+#endif
 
 // CDC Endpoint transfer buffer size, more is faster
+#ifndef CFG_TUD_CDC_EP_BUFSIZE
 #define CFG_TUD_CDC_EP_BUFSIZE   (TUD_OPT_HIGH_SPEED ? 512 : 64)
+#endif
 
 #ifdef __cplusplus
  }
