@@ -1,0 +1,30 @@
+# Build output produced in-tree by `make libs` and by example builds.
+#
+# These are rebuildable artifacts, not sources. Reproduce them with e.g.:
+#
+#   make libs PROFILE=debug DEVICE_TYPE=GP \
+#        CGT_TI_ARM_CLANG_PATH=<ti-cgt-armllvm path> \
+#        BUILD_COMBO_ALL="nortos_r5f.ti-arm-clang drivers_r5f.ti-arm-clang.nortos ..."
+#
+# They are required to LINK any example, so do not delete them casually - a
+# missing lib/ here surfaces as "cannot find file <...>.lib" at link time, not
+# as a compile error.
+
+# Intermediate objects. No obj/ directory anywhere in this SDK is tracked.
+**/obj/
+
+# Generated static libraries, listed per buildable component rather than as a
+# blanket **/lib/ rule: source/cmsis/lib/ ships PREBUILT and is tracked, and it
+# uses the same <component>.am261x.r5f.ti-arm-clang.<os>.<profile>.lib naming as
+# the generated ones, so a wildcard cannot tell them apart. Add a line here when
+# building a component that is not yet listed.
+source/board/lib/
+source/drivers/lib/
+source/kernel/nortos/lib/
+source/kernel/freertos/lib/
+source/usb/synp/lib/
+source/usb/tinyusb/lib/
+
+# Python bytecode from tools/boot/multicore-elf/genimage.py
+__pycache__/
+*.pyc
